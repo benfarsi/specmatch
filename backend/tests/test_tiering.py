@@ -15,3 +15,17 @@ def test_mid_score_is_yellow():
 
 def test_low_score_is_red():
     assert assign_tier(0.30, THRESHOLDS) is Tier.red
+
+
+def test_score_exactly_at_accept_min_is_green():
+    # Issue #2: both thresholds are inclusive lower bounds (see
+    # config/settings.yaml), so a score exactly equal to accept_min must be
+    # green, not yellow.
+    assert assign_tier(0.85, THRESHOLDS) is Tier.green
+
+
+def test_score_exactly_at_review_min_is_yellow():
+    # The symmetric boundary: a score exactly equal to review_min must be
+    # yellow, not red. Guards against fixing the accept_min boundary by
+    # flipping the wrong operator.
+    assert assign_tier(0.60, THRESHOLDS) is Tier.yellow
