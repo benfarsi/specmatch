@@ -19,6 +19,7 @@ templates = Jinja2Templates(directory=Path(__file__).resolve().parents[1] / "tem
 
 @router.get("/", response_class=HTMLResponse)
 def record_table(request: Request, category: str | None = Query(default=None)):
+    category = category or None  # "" (the All option) means no filter, same as absent
     conn = get_conn()
     try:
         categories = [
