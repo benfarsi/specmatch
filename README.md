@@ -127,7 +127,7 @@ record's list → `400`.
 
 ```bash
 cd backend
-pytest                    # 48 tests
+pytest                    # 52 tests
 ruff check app tests      # lint (also run in CI)
 ```
 

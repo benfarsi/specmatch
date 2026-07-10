@@ -25,7 +25,7 @@ from app.services.matching.interfaces import (
     CandidateScorer,
     MatchingEngine,
 )
-from app.services.matches import save_match
+from app.services.matches import get_match, save_match
 from app.services.matching.retriever import LexicalRetriever
 from app.services.matching.scorer import WeightedScorer
 from app.services.matching.tiering import assign_tier
@@ -53,7 +53,7 @@ class LexicalMatchingEngine(MatchingEngine):
         conn = get_conn()
         try:
             catalog = self._load_catalog(conn)
-            result = self._match(record, catalog)
+            result = self._carry_forward_review(conn, self._match(record, catalog))
             save_match(conn, result)
             conn.commit()
         finally:
@@ -65,7 +65,10 @@ class LexicalMatchingEngine(MatchingEngine):
         try:
             catalog = self._load_catalog(conn)
             records = self._load_records(conn)
-            results = [self._match(record, catalog) for record in records]
+            results = [
+                self._carry_forward_review(conn, self._match(record, catalog))
+                for record in records
+            ]
             for result in results:
                 save_match(conn, result)
             conn.commit()
@@ -104,6 +107,26 @@ class LexicalMatchingEngine(MatchingEngine):
             selected_catalog_id=top[0].catalog_id if (tier is Tier.green and top) else None,
             review=None,
             matched_at=datetime.now(timezone.utc),
+        )
+
+    def _carry_forward_review(
+        self, conn: sqlite3.Connection, result: MatchResult
+    ) -> MatchResult:
+        """Keep an existing human review across re-matching.
+
+        Matching runs on every startup, refreshing candidates and tiers, but
+        a persisted review decision is authoritative: without carrying it
+        forward, save_match's INSERT OR REPLACE would silently discard it on
+        every restart.
+        """
+        existing = get_match(conn, result.record_id)
+        if existing is None or existing.review is None:
+            return result
+        return result.model_copy(
+            update={
+                "review": existing.review,
+                "selected_catalog_id": existing.selected_catalog_id,
+            }
         )
 
     def _load_catalog(self, conn: sqlite3.Connection) -> list[CatalogEntry]:
