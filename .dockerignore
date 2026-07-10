@@ -1,0 +1,12 @@
+# Keep the build context small and the image clean. Paths are relative to the
+# build context (the repo root).
+.git/
+**/__pycache__/
+**/*.py[cod]
+backend/.venv/
+backend/var/
+**/.pytest_cache/
+**/.ruff_cache/
+*.db
+**/*.db
+.env

@@ -22,6 +22,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
 
+      - name: Lint
+        run: ruff check backend/app backend/tests
+
       - name: Run tests
         working-directory: backend
         run: pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          cp .env.example .env
+          docker compose build
