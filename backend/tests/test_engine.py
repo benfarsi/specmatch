@@ -4,7 +4,9 @@ from collections import Counter
 
 import pytest
 
-from app.models.schemas import Tier
+from app.core.db import get_conn
+from app.models.schemas import ReviewAction, ReviewRequest, Tier
+from app.services import matches as matches_repo
 from app.services.ingest import run_ingest
 from app.services.matching.engine import LexicalMatchingEngine
 
@@ -79,3 +81,40 @@ def test_green_record_auto_selects_top_candidate(matches):
 def test_persists_at_most_top_k_candidates(matches):
     # config/settings.yaml sets top_k = 5.
     assert all(len(m.candidates) <= 5 for m in matches.values())
+
+
+def test_rematch_preserves_persisted_reviews():
+    # Every startup re-runs match_all (see main.lifespan), so a container
+    # restart must not discard a persisted human review: the reviewer's
+    # decision is authoritative and survives re-matching.
+    previous = os.environ.get("DATA_DIR")
+    os.environ["DATA_DIR"] = tempfile.mkdtemp()
+    try:
+        run_ingest()
+        engine = LexicalMatchingEngine()
+        engine.match_all()
+        conn = get_conn()
+        try:
+            matches_repo.apply_review(
+                conn,
+                "SRC-0001",
+                ReviewRequest(action=ReviewAction.accept, note="confirmed by reviewer"),
+            )
+        finally:
+            conn.close()
+
+        engine.match_all()  # what a restart does
+
+        conn = get_conn()
+        try:
+            match = matches_repo.get_match(conn, "SRC-0001")
+        finally:
+            conn.close()
+    finally:
+        if previous is None:
+            os.environ.pop("DATA_DIR", None)
+        else:
+            os.environ["DATA_DIR"] = previous
+    assert match.review is not None
+    assert match.review.action is ReviewAction.accept
+    assert match.review.note == "confirmed by reviewer"
