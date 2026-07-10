@@ -127,7 +127,7 @@ record's list → `400`.
 
 ```bash
 cd backend
-pytest                    # 52 tests
+pytest                    # 54 tests
 ruff check app tests      # lint (also run in CI)
 ```
 
@@ -182,16 +182,65 @@ The spread reflects real confidence, not an avoidance strategy:
 - **Red**: `MATL PER DWG S-501` (best 0.41): a genuinely vague input
   ("material per drawing") with no honest catalog match.
 
-### Known limitation
+### Known limitations
 
-The imperial→metric conversion is a deliberately small static lookup covering
-only the gypsum board thicknesses present in the data (`1/2in`, `5/8in`); it is
-not a general unit converter. The `unit_compatibility` signal operates on the
-metric-only `unit` column (exact match, with `kg`/`t` treated as compatible
-mass). A record whose sole discriminator was an unhandled imperial dimension
-could still be mis-scored, a documented tradeoff, not a bug. Retrieval sits
-behind the `CandidateRetriever` interface, so an embedding/TF-IDF layer could
-be added later without changing the engine.
+The engine makes deliberate scope choices. Each item below is a boundary I
+would revisit with more time, not a defect.
+
+**Retrieval shortlist size (`SHORTLIST_SIZE = 25`).** Retrieval ranks the
+catalog by `token_sort_ratio` alone and passes only the top 25 entries to the
+scorer. If the correct entry is not in that top 25 on string similarity,
+scoring never sees it and the category/unit signals cannot rescue it. For this
+fixture the right match sits comfortably near the top, so 25 is generous
+headroom over `top_k = 5`; but a badly garbled or very sparse source record
+could push its true match past rank 25 and lose it silently. A fuller version
+would make the shortlist adaptive or add a second, semantic retrieval pass
+behind the same `CandidateRetriever` interface.
+
+**Neutral 0.5 for blank category/unit.** 35 records have no category and 24
+have no unit; those signals then score a fixed 0.5. This deliberately avoids
+punishing a record for missing metadata, but 0.5 carries no information
+either, so such records lean almost entirely on string similarity, and a
+plausible-looking wrong candidate is not held back the way a true category
+mismatch (0.0) would hold it back. A fuller version might infer the category
+from the text, or renormalize the remaining weights when a signal is absent
+rather than feeding in a constant.
+
+**Imperial→metric conversion is gypsum-only.** The static lookup covers just
+the two board thicknesses that appear in the data (`1/2in`, `5/8in`). Other
+imperial dimensions match only because the catalog also uses imperial (for
+example HSS `6x6x1/4` on both sides). A record whose sole discriminator was an
+imperial↔metric mismatch outside that lookup could still mis-score. A fuller
+version would parse and convert units generally rather than table-match a
+handful of strings.
+
+**Discrimination within a category is purely lexical.** Category and unit are
+identical across candidates in the same category (every Concrete entry is
+`m3`), so within a category only string similarity separates candidates.
+Near-miss specs score close (`50 MPa` vs `20 MPa` differ by a single token),
+so the top candidate is usually correct but its margin over the runner-up is
+thin, and there is no structured understanding of strength, percentage, or
+dimension. A fuller version would extract and numerically compare structured
+spec fields, and add embeddings for semantic matches the hand-curated
+abbreviation map does not cover.
+
+**Idempotency depends on the current schema.** The re-ingest fix relies on a
+`UNIQUE` constraint that `CREATE TABLE IF NOT EXISTS` only applies when
+creating the table. A data volume created under the old (pre-fix) schema will
+not gain the constraint and can still accumulate duplicates on re-ingest,
+observed once locally as a stale-volume artifact. A clean clone is unaffected;
+a fuller version would add an explicit migration rather than rely on first-run
+table creation.
+
+**Matching re-runs in full on every startup.** `match_all` re-scores all 150
+records against all 800 catalog entries on each boot. That is trivially fast at
+this size, but it is not incremental; a much larger catalog or record set would
+want cached normalization or dirty-record matching. Persisted human reviews are
+carried forward across these re-runs (`_carry_forward_review`), so a restart
+refreshes candidates and tiers without discarding reviewer decisions.
+
+Retrieval sits behind the `CandidateRetriever` interface, so an embedding or
+TF-IDF layer could be added later without changing the engine.
 
 ## Issue fixes
 
@@ -255,14 +304,53 @@ with the issue number in the fix commit.
 
 ## AI usage
 
-I used Claude Code throughout, but stayed the one making design decisions and
-writing my own `ARCHITECTURE_NOTES.md` / `PLAN.md` answers rather than
-accepting drafted ones. One concrete correction: I initially asked for an
-imperial↔metric unit-conversion lookup inside the unit-compatibility signal.
-Claude Code flagged that this would be dead code (the `unit` column in this
-dataset is already all-metric) and that the real ambiguity lived in the
-description text instead, which changed where (and whether) I built that logic
-(it moved into `normalize.py`, scoped so it couldn't break HSS matching). I
-kept manual: all design tradeoffs (whole-catalog vs. pre-filter, issue
-root-cause diagnosis before any fix). I delegated: boilerplate router/template
-code, test scaffolding, and CI configuration.
+This project was built with heavy use of Claude Code, and I am not claiming
+otherwise. Claude wrote most of the code; the value I added was judgment: which
+decisions to make, which suggestions to reject, and refusing to trust that
+something worked until it was tested. We worked in small, reviewed increments
+rather than large unsupervised passes, and I wrote the comprehension answers in
+`ARCHITECTURE_NOTES.md` and `PLAN.md` myself; Claude's role there was
+scaffolding and accuracy-checking, not authorship.
+
+Moments where my judgment changed the outcome:
+
+- **A skeptical restart audit caught a core-engine bug.** Because matching
+  re-runs on every startup, I insisted on actually testing a Docker restart
+  rather than trusting a green checkmark. That surfaced a real data-integrity
+  bug: `match_all`'s `INSERT OR REPLACE` was silently overwriting persisted
+  human reviews with `review = None` on every boot. The fix
+  (`_carry_forward_review`) reloads any existing review and carries it forward,
+  and a regression test simulates a restart and asserts the reviewer's decision
+  survives.
+- **Switched the core scoring metric on empirical evidence.** String similarity
+  started as `token_set_ratio`; a side-by-side comparison showed it gave a bare
+  `STL` a perfect score against a full beam spec (badly over-confident), so I
+  switched to `token_sort_ratio`, which stays honest about length. This is the
+  highest-weight signal in the engine, so the choice mattered.
+- **Claude corrected one of my assumptions.** I asked for an imperial↔metric
+  lookup inside the `unit_compatibility` signal; Claude checked the data and
+  flagged it would be dead code (the `unit` column is already all-metric) and
+  that the real gap was in the description text. The logic moved into
+  `normalize.py`, scoped so it could not break HSS steel matching.
+- **Chose the robust design over the convenient one.** Offered whole-catalog
+  scoring vs. a category pre-filter, I chose whole-catalog specifically because
+  a pre-filter would silently drop the right answer for the 35 records with
+  blank or mislabeled categories; category earns its weight as a signal, not a
+  gate.
+- **Found a wiring bug in delivered UI.** After the review console was built, I
+  noticed the tier tabs did not actually filter; I had Claude show me the router
+  and template and diagnose the cause (inert `<span>`s; the router only ever
+  loaded yellow/red) before fixing it.
+
+What was **fully delegated**: boilerplate routers and Jinja templates, test
+scaffolding, the `Dockerfile`/`.dockerignore`, and CI configuration.
+**Co-designed**: the engine's signals and weights, the normalization approach,
+and the retrieval metric (Claude proposed the `token_sort`/`token_set`
+comparison; I chose from the evidence). Claude also proposed the root-cause
+diagnosis for each filed issue, which I reviewed and confirmed before approving
+a fix. **Entirely my call**: which option to take among the alternatives Claude
+laid out: whole-catalog vs. pre-filter, `UNIQUE` + `INSERT OR REPLACE` vs.
+truncate-and-reload for the ingest fix, and deferring the embedding stretch to
+protect a strong core. I also enforced process: Task 1 docs committed before any
+implementation, and every filed issue reproduced with a failing test before its
+fix.
