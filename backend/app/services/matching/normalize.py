@@ -55,11 +55,27 @@ ABBREVIATIONS = {
 _NUM_THEN_ALPHA = re.compile(r"(?<=\d)(?=[a-z])")
 _ALPHA_THEN_NUM = re.compile(r"(?<=[a-z])(?=\d)")
 
+# Imperial board thicknesses the source writes in inches but the catalog lists
+# in millimetres (gypsum board). Scoped to the fraction+"in" forms that
+# actually appear in the data -- bare fractions like HSS "6x6x1/4" have no
+# trailing "in" and are deliberately left untouched, so steel HSS matching is
+# unaffected.
+_IMPERIAL_INCH_TO_MM = {
+    "1/2": "12.7 mm",
+    "5/8": "15.9 mm",
+}
+_INCH_FRACTION = re.compile(r"(\d+/\d+)\s*in\b")
+
+
+def _inch_to_mm(match: "re.Match[str]") -> str:
+    return _IMPERIAL_INCH_TO_MM.get(match.group(1), match.group(0))
+
 
 def normalize(text: str) -> str:
     """Normalize one description for matching. Idempotent and pure."""
     text = text.lower()
     text = text.replace("w/", " with ")
+    text = _INCH_FRACTION.sub(_inch_to_mm, text)  # 5/8in -> 15.9 mm (gypsum)
     text = re.sub(r'[,"()\-]', " ", text)        # drop separators, split hyphens
     text = _NUM_THEN_ALPHA.sub(" ", text)
     text = _ALPHA_THEN_NUM.sub(" ", text)

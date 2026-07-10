@@ -21,6 +21,21 @@ def test_lowercases_and_collapses_whitespace():
     assert normalize("BATT  INSUL") == "batt insulation"
 
 
+def test_converts_gypsum_imperial_thickness_to_metric():
+    # Source writes gypsum thickness in inches; catalog uses millimetres.
+    assert normalize("GYP BD 5/8in TYPE X") == "gypsum board 15.9 mm type x"
+    assert "12.7 mm" in normalize("GYP BD 1/2IN TYPE X")
+
+
+def test_hss_bare_fractions_are_not_converted():
+    # HSS uses bare fractions with no trailing "in" (and the catalog matches
+    # that form), so they must be left alone -- converting them would break
+    # ~40 steel matches.
+    out = normalize("STL HSS 8X8X1/2 GR B")
+    assert "1/2" in out
+    assert "12.7 mm" not in out
+
+
 def test_is_idempotent():
     # Normalizing an already-normalized string must not change it.
     once = normalize("CONC RM 50MPA W/ 25% SLAG")
