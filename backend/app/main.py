@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.core.logging import configure_logging, log_event
 from app.routers import console, health, matches, records
 from app.services.ingest import run_ingest
+from app.services.matching.engine import LexicalMatchingEngine
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     configure_logging()
     run_ingest()
+    LexicalMatchingEngine().match_all()
     log_event(logger, logging.INFO, "app_started")
     yield
 

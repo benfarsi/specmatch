@@ -4,5 +4,9 @@ def test_health_shape(client):
     body = resp.json()
     assert body["status"] == "ok"
     assert body["records"] == 150
-    assert body["matched"] == 0
-    assert body["tiers"] == {"green": 0, "yellow": 0, "red": 0}
+    # Matching runs at startup, so every record is matched into a tier.
+    assert body["matched"] == 150
+    tiers = body["tiers"]
+    assert set(tiers) == {"green", "yellow", "red"}
+    assert all(isinstance(v, int) and v >= 0 for v in tiers.values())
+    assert sum(tiers.values()) == body["matched"]
