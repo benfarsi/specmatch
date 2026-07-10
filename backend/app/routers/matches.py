@@ -1,9 +1,10 @@
-"""Match endpoints. Stubbed — completing them to the frozen contracts in
-models/schemas.py is Task 4."""
+"""Match endpoints, completed to the frozen contracts in models/schemas.py."""
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.core.db import get_conn
 from app.models.schemas import MatchesResponse, MatchResult, ReviewRequest, Tier
+from app.services import matches as matches_repo
 
 router = APIRouter()
 
@@ -14,13 +15,22 @@ def list_matches(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> MatchesResponse:
-    # TODO(Task 4): return persisted MatchResults, filterable by tier,
-    # shaped as MatchesResponse per models/schemas.py.
-    raise HTTPException(status_code=501, detail="Not implemented (Task 4)")
+    conn = get_conn()
+    try:
+        total, items = matches_repo.list_matches(conn, tier, limit, offset)
+    finally:
+        conn.close()
+    return MatchesResponse(total=total, items=items)
 
 
 @router.post("/matches/{record_id}/review", response_model=MatchResult)
 def review_match(record_id: str, body: ReviewRequest) -> MatchResult:
-    # TODO(Task 4): persist the review decision (auditable) and return the
-    # updated MatchResult per models/schemas.py.
-    raise HTTPException(status_code=501, detail="Not implemented (Task 4)")
+    conn = get_conn()
+    try:
+        return matches_repo.apply_review(conn, record_id, body)
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"no match for record {record_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        conn.close()
