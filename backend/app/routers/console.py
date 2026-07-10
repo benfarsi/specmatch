@@ -53,12 +53,18 @@ def record_table(request: Request, category: str | None = Query(default=None)):
 
 
 @router.get("/review", response_class=HTMLResponse)
-def review_panel(request: Request):
+def review_panel(request: Request, tier: Tier | None = Query(default=None)):
     conn = get_conn()
     try:
         counts = matches_repo.tier_counts(conn)
-        _, yellow = matches_repo.list_matches(conn, Tier.yellow, limit=500, offset=0)
-        _, red = matches_repo.list_matches(conn, Tier.red, limit=500, offset=0)
+        if tier is not None:
+            _, items = matches_repo.list_matches(conn, tier, limit=500, offset=0)
+            queues = [(tier.value, items)]
+        else:
+            # Default view: the review queue (yellow then red).
+            _, yellow = matches_repo.list_matches(conn, Tier.yellow, limit=500, offset=0)
+            _, red = matches_repo.list_matches(conn, Tier.red, limit=500, offset=0)
+            queues = [("yellow", yellow), ("red", red)]
     finally:
         conn.close()
     return templates.TemplateResponse(
@@ -66,8 +72,8 @@ def review_panel(request: Request):
         "review.html",
         {
             "counts": counts,
-            # Ordered queues rendered as grouped sections in the template.
-            "queues": [("yellow", yellow), ("red", red)],
+            "queues": queues,
+            "selected_tier": tier.value if tier is not None else None,
         },
     )
 

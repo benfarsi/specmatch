@@ -35,6 +35,30 @@ def test_review_page_shows_counts_and_queues(client):
     assert "queue" in body  # the grouped tier sections
 
 
+def test_review_filters_by_tier_and_has_links(client):
+    body = client.get("/review").text
+    # the pills are real filter links now, not inert spans
+    assert 'href="/review?tier=green"' in body
+    assert 'href="/review?tier=yellow"' in body
+    assert 'href="/review?tier=red"' in body
+
+
+def test_review_green_tab_is_read_only(client):
+    body = client.get("/review", params={"tier": "green"}).text
+    assert "green queue" in body
+    assert "Auto-accepted" in body
+    # green is already auto-accepted: no action buttons
+    assert 'value="accept"' not in body
+    assert 'value="reject"' not in body
+
+
+def test_review_yellow_tab_keeps_action_buttons(client):
+    body = client.get("/review", params={"tier": "yellow"}).text
+    assert "yellow queue" in body
+    assert 'value="accept"' in body
+    assert 'value="reject"' in body
+
+
 def test_review_action_persists_via_console(client):
     yellow = client.get("/matches", params={"tier": "yellow", "limit": 1}).json()["items"][0]
     record_id = yellow["record_id"]

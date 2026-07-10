@@ -10,7 +10,11 @@
   .pill.green { color: #7ee787; }
   .pill.yellow { color: #e3b341; }
   .pill.red { color: #f47067; }
+  a.pill { text-decoration: none; }
+  a.pill:hover { border-color: var(--muted); }
+  .pill.active { border-color: var(--accent); background: var(--bg); }
   h2.queue { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 24px 0 12px; }
+  h2.queue.green { color: #7ee787; }
   h2.queue.yellow { color: #e3b341; }
   h2.queue.red { color: #f47067; }
   .card {
@@ -25,9 +29,10 @@
 </style>
 
 <div class="counts">
-  <span class="pill green">Green {{ counts.green }}</span>
-  <span class="pill yellow">Yellow {{ counts.yellow }}</span>
-  <span class="pill red">Red {{ counts.red }}</span>
+  <a class="pill green {% if selected_tier == 'green' %}active{% endif %}" href="/review?tier=green">Green {{ counts.green }}</a>
+  <a class="pill yellow {% if selected_tier == 'yellow' %}active{% endif %}" href="/review?tier=yellow">Yellow {{ counts.yellow }}</a>
+  <a class="pill red {% if selected_tier == 'red' %}active{% endif %}" href="/review?tier=red">Red {{ counts.red }}</a>
+  <a class="pill {% if selected_tier is none %}active{% endif %}" href="/review">Review queue</a>
 </div>
 
 {% for tier, items in queues %}
@@ -39,6 +44,9 @@
   <div class="reviewed">
     Reviewed: {{ m.review.action.value }}{% if m.selected_catalog_id %} → <code>{{ m.selected_catalog_id }}</code>{% endif %}
   </div>
+  {% endif %}
+  {% if tier == 'green' and m.selected_catalog_id %}
+  <div class="reviewed">Auto-accepted → <code>{{ m.selected_catalog_id }}</code></div>
   {% endif %}
   <table>
     <thead>
@@ -61,6 +69,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% if tier != 'green' %}
   <div class="actions">
     <form method="post" action="/review/{{ m.record_id }}">
       <button name="action" value="accept" type="submit">Accept top</button>
@@ -75,6 +84,7 @@
       <button name="action" value="reject" type="submit">Reject</button>
     </form>
   </div>
+  {% endif %}
 </div>
 {% else %}
 <p class="muted">No {{ tier }} records.</p>
