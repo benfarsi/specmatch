@@ -25,6 +25,7 @@ from app.services.matching.interfaces import (
     CandidateScorer,
     MatchingEngine,
 )
+from app.services.matches import save_match
 from app.services.matching.retriever import LexicalRetriever
 from app.services.matching.scorer import WeightedScorer
 from app.services.matching.tiering import assign_tier
@@ -53,7 +54,7 @@ class LexicalMatchingEngine(MatchingEngine):
         try:
             catalog = self._load_catalog(conn)
             result = self._match(record, catalog)
-            self._persist(conn, result)
+            save_match(conn, result)
             conn.commit()
         finally:
             conn.close()
@@ -66,7 +67,7 @@ class LexicalMatchingEngine(MatchingEngine):
             records = self._load_records(conn)
             results = [self._match(record, catalog) for record in records]
             for result in results:
-                self._persist(conn, result)
+                save_match(conn, result)
             conn.commit()
         finally:
             conn.close()
@@ -157,27 +158,3 @@ class LexicalMatchingEngine(MatchingEngine):
             )
             for row in rows
         ]
-
-    def _persist(self, conn: sqlite3.Connection, result: MatchResult) -> None:
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO matches (record_id, payload, tier, matched_at)"
-                " VALUES (?, ?, ?, ?)",
-                (
-                    result.record_id,
-                    result.model_dump_json(),
-                    result.tier.value,
-                    result.matched_at.isoformat(),
-                ),
-            )
-        except sqlite3.Error as exc:
-            log_event(
-                logger,
-                logging.ERROR,
-                "dependency_failure",
-                dependency="sqlite",
-                operation="persist_match",
-                record_id=result.record_id,
-                error=str(exc),
-            )
-            raise DependencyError("could not persist match") from exc
