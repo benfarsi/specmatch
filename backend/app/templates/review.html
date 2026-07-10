@@ -21,6 +21,12 @@
     border: 1px solid var(--border); border-radius: 8px; padding: 16px;
     margin-bottom: 16px; background: var(--surface);
   }
+  /* Review state, rendered from the persisted review (and mirrored by the
+     fetch enhancement below): accepted/overridden cards get a green tint,
+     rejected cards dim so "handled" reads at a glance in a long queue. */
+  .card.handled { border-color: rgba(126, 231, 135, 0.6); background: rgba(126, 231, 135, 0.06); }
+  .card.rejected { opacity: 0.55; }
+  .actions button[disabled] { opacity: 0.6; cursor: wait; }
   .card h3 { margin: 0 0 8px; font-size: 0.9rem; font-weight: 600; }
   .reviewed { color: var(--accent); font-size: 0.85rem; margin: 4px 0 8px; }
   .sig { color: var(--muted); font-size: 0.8rem; }
@@ -38,7 +44,7 @@
 {% for tier, items in queues %}
 <h2 class="queue {{ tier }}">{{ tier }} queue — {{ items | length }} record(s)</h2>
 {% for m in items %}
-<div class="card">
+<div class="card{% if m.review %}{{ ' rejected' if m.review.action.value == 'reject' else ' handled' }}{% endif %}" id="{{ m.record_id }}">
   <h3><code>{{ m.record_id }}</code> — <code>{{ m.source_text }}</code></h3>
   {% if m.review %}
   <div class="reviewed">
@@ -72,9 +78,11 @@
   {% if tier != 'green' %}
   <div class="actions">
     <form method="post" action="/review/{{ m.record_id }}">
+      {% if selected_tier %}<input type="hidden" name="tier" value="{{ selected_tier }}">{% endif %}
       <button name="action" value="accept" type="submit">Accept top</button>
     </form>
     <form method="post" action="/review/{{ m.record_id }}">
+      {% if selected_tier %}<input type="hidden" name="tier" value="{{ selected_tier }}">{% endif %}
       <select name="catalog_id">
         {% for c in m.candidates %}
         <option value="{{ c.catalog_id }}">{{ c.catalog_id }} — {{ c.description }}</option>
@@ -90,4 +98,59 @@
 <p class="muted">No {{ tier }} records.</p>
 {% endfor %}
 {% endfor %}
+
+<script>
+  // Progressive enhancement (same spirit as the records category filter):
+  // submit review actions with fetch so the page — and the reviewer's scroll
+  // position — stays put. Buttons disable while the request is in flight,
+  // then the card picks up the same handled/rejected state the server
+  // renders from the persisted review. Without JS (or on any error) the
+  // form falls back to the normal POST-Redirect-GET flow.
+  document.querySelectorAll(".actions form").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      const button = event.submitter;
+      if (!button || !window.fetch) return; // let the native submit run
+      event.preventDefault();
+      const card = form.closest(".card");
+      const buttons = card.querySelectorAll(".actions button");
+      const body = new URLSearchParams(new FormData(form));
+      body.set(button.name, button.value);
+      buttons.forEach((b) => { b.disabled = true; });
+      try {
+        // getAttribute, not form.action: the buttons are name="action", and a
+        // named control shadows the form's .action property (DOM clobbering).
+        const resp = await fetch(form.getAttribute("action"), { method: "POST", body: body });
+        if (!resp.ok) throw new Error("review failed: HTTP " + resp.status);
+        const action = body.get("action");
+        card.classList.toggle("rejected", action === "reject");
+        card.classList.toggle("handled", action !== "reject");
+        let line = card.querySelector(".reviewed");
+        if (!line) {
+          line = document.createElement("div");
+          line.className = "reviewed";
+          card.querySelector("h3").after(line);
+        }
+        const topCandidate = card.querySelector("tbody code");
+        const selected =
+          action === "override" ? body.get("catalog_id")
+          : action === "accept" && topCandidate ? topCandidate.textContent
+          : null;
+        line.textContent = "Reviewed: " + action + (selected ? " → " + selected : "");
+      } catch (err) {
+        console.error(err);
+        // Fall back to the full-page flow. form.submit() skips the clicked
+        // button's name/value, so carry the action in a hidden input.
+        const fallback = document.createElement("input");
+        fallback.type = "hidden";
+        fallback.name = button.name;
+        fallback.value = button.value;
+        form.appendChild(fallback);
+        form.submit();
+        return;
+      } finally {
+        buttons.forEach((b) => { b.disabled = false; });
+      }
+    });
+  });
+</script>
 {% endblock %}

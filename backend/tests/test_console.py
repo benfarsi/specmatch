@@ -72,3 +72,34 @@ def test_review_action_persists_via_console(client):
         if m["record_id"] == record_id
     )
     assert persisted["review"]["action"] == "accept"
+
+
+def test_review_redirect_returns_to_tier_view(client):
+    # The no-JS flow: acting from a tier tab must land back on that tab,
+    # anchored to the reviewed card, instead of dumping the reviewer at the
+    # top of the default queue.
+    record_id = client.get("/matches", params={"tier": "red", "limit": 1}).json()["items"][0][
+        "record_id"
+    ]
+    resp = client.post(
+        f"/review/{record_id}",
+        data={"action": "reject", "tier": "red"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"/review?tier=red#{record_id}"
+
+
+def test_reviewed_cards_render_persisted_state(client):
+    # Accepted/overridden cards are highlighted (handled), rejected cards are
+    # dimmed (rejected). Both classes come from the persisted review, so the
+    # state survives a full page reload.
+    red = client.get("/matches", params={"tier": "red", "limit": 1}).json()["items"][0]
+    client.post(f"/review/{red['record_id']}", data={"action": "reject"})
+    yellow = client.get("/matches", params={"tier": "yellow", "limit": 2}).json()["items"][1]
+    client.post(f"/review/{yellow['record_id']}", data={"action": "accept"})
+
+    red_body = client.get("/review", params={"tier": "red"}).text
+    assert f'class="card rejected" id="{red["record_id"]}"' in red_body
+    yellow_body = client.get("/review", params={"tier": "yellow"}).text
+    assert f'class="card handled" id="{yellow["record_id"]}"' in yellow_body

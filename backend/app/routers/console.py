@@ -84,6 +84,7 @@ def submit_review(
     action: str = Form(...),
     catalog_id: str | None = Form(default=None),
     note: str | None = Form(default=None),
+    tier: Tier | None = Form(default=None),
 ):
     conn = get_conn()
     try:
@@ -99,5 +100,8 @@ def submit_review(
         pass
     finally:
         conn.close()
-    # POST-Redirect-GET so a refresh doesn't re-submit the review.
-    return RedirectResponse("/review", status_code=303)
+    # POST-Redirect-GET so a refresh doesn't re-submit the review. Return to
+    # the tier view the form was on, anchored to the reviewed card so the
+    # no-JS flow lands back where the reviewer was.
+    target = f"/review?tier={tier.value}" if tier is not None else "/review"
+    return RedirectResponse(f"{target}#{record_id}", status_code=303)
