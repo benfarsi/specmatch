@@ -1,10 +1,83 @@
 {% extends "base.html" %}
 {% block title %}Review · SpecMatch{% endblock %}
 {% block content %}
-<h2>Review panel</h2>
-<p class="muted">
-  Not implemented yet (Task 5): work the yellow/red queues — tier counts,
-  top candidates with per-signal score breakdowns, and
-  accept / override / reject actions persisted through the API.
-</p>
+<style>
+  .counts { display: flex; gap: 12px; margin-bottom: 24px; }
+  .pill {
+    padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px;
+    font-size: 0.85rem;
+  }
+  .pill.green { color: #7ee787; }
+  .pill.yellow { color: #e3b341; }
+  .pill.red { color: #f47067; }
+  h2.queue { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 24px 0 12px; }
+  h2.queue.yellow { color: #e3b341; }
+  h2.queue.red { color: #f47067; }
+  .card {
+    border: 1px solid var(--border); border-radius: 8px; padding: 16px;
+    margin-bottom: 16px; background: var(--surface);
+  }
+  .card h3 { margin: 0 0 8px; font-size: 0.9rem; font-weight: 600; }
+  .reviewed { color: var(--accent); font-size: 0.85rem; margin: 4px 0 8px; }
+  .sig { color: var(--muted); font-size: 0.8rem; }
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .actions form { display: inline-flex; gap: 8px; align-items: center; }
+</style>
+
+<div class="counts">
+  <span class="pill green">Green {{ counts.green }}</span>
+  <span class="pill yellow">Yellow {{ counts.yellow }}</span>
+  <span class="pill red">Red {{ counts.red }}</span>
+</div>
+
+{% for tier, items in queues %}
+<h2 class="queue {{ tier }}">{{ tier }} queue — {{ items | length }} record(s)</h2>
+{% for m in items %}
+<div class="card">
+  <h3><code>{{ m.record_id }}</code> — <code>{{ m.source_text }}</code></h3>
+  {% if m.review %}
+  <div class="reviewed">
+    Reviewed: {{ m.review.action.value }}{% if m.selected_catalog_id %} → <code>{{ m.selected_catalog_id }}</code>{% endif %}
+  </div>
+  {% endif %}
+  <table>
+    <thead>
+      <tr><th>Candidate</th><th>Description</th><th>Score</th><th>str / cat / unit</th></tr>
+    </thead>
+    <tbody>
+      {% for c in m.candidates %}
+      <tr>
+        <td><code>{{ c.catalog_id }}</code></td>
+        <td>{{ c.description }}</td>
+        <td>{{ "%.3f"|format(c.score) }}</td>
+        <td class="sig">
+          {{ "%.2f"|format(c.signals['string_similarity']) }} /
+          {{ "%.2f"|format(c.signals['category_agreement']) }} /
+          {{ "%.2f"|format(c.signals['unit_compatibility']) }}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">No candidates.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="actions">
+    <form method="post" action="/review/{{ m.record_id }}">
+      <button name="action" value="accept" type="submit">Accept top</button>
+    </form>
+    <form method="post" action="/review/{{ m.record_id }}">
+      <select name="catalog_id">
+        {% for c in m.candidates %}
+        <option value="{{ c.catalog_id }}">{{ c.catalog_id }} — {{ c.description }}</option>
+        {% endfor %}
+      </select>
+      <button name="action" value="override" type="submit">Override</button>
+      <button name="action" value="reject" type="submit">Reject</button>
+    </form>
+  </div>
+</div>
+{% else %}
+<p class="muted">No {{ tier }} records.</p>
+{% endfor %}
+{% endfor %}
 {% endblock %}

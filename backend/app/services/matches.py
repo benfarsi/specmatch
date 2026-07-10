@@ -69,6 +69,29 @@ def list_matches(
     return total, [MatchResult.model_validate_json(row["payload"]) for row in rows]
 
 
+def tier_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Return the number of matches in each tier (missing tiers are 0)."""
+    counts = {tier.value: 0 for tier in Tier}
+    try:
+        rows = conn.execute(
+            "SELECT tier, COUNT(*) AS n FROM matches GROUP BY tier"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "dependency_failure",
+            dependency="sqlite",
+            operation="tier_counts",
+            error=str(exc),
+        )
+        raise DependencyError("could not count tiers") from exc
+    for row in rows:
+        if row["tier"] in counts:
+            counts[row["tier"]] = row["n"]
+    return counts
+
+
 def get_match(conn: sqlite3.Connection, record_id: str) -> MatchResult | None:
     try:
         row = conn.execute(

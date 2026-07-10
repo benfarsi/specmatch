@@ -25,3 +25,26 @@ def test_all_categories_shows_all_records(client):
     assert match is not None, "All categories option not found"
     resp = client.get("/", params={"category": match.group(1)})
     assert len(re.findall(r"SRC-\d+", resp.text)) == total
+
+
+def test_review_page_shows_counts_and_queues(client):
+    resp = client.get("/review")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Green" in body and "Yellow" in body and "Red" in body
+    assert "queue" in body  # the grouped tier sections
+
+
+def test_review_action_persists_via_console(client):
+    yellow = client.get("/matches", params={"tier": "yellow", "limit": 1}).json()["items"][0]
+    record_id = yellow["record_id"]
+    resp = client.post(
+        f"/review/{record_id}", data={"action": "accept"}, follow_redirects=False
+    )
+    assert resp.status_code == 303  # POST-Redirect-GET
+    persisted = next(
+        m
+        for m in client.get("/matches", params={"tier": "yellow", "limit": 500}).json()["items"]
+        if m["record_id"] == record_id
+    )
+    assert persisted["review"]["action"] == "accept"

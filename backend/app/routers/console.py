@@ -1,16 +1,15 @@
-"""Server-rendered review console (Jinja2).
-
-The record table is implemented. The review panel is stubbed — completing
-it is Task 5.
-"""
+"""Server-rendered review console (Jinja2)."""
 
 from pathlib import Path
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
 from fastapi.templating import Jinja2Templates
 
 from app.core.db import get_conn
+from app.models.schemas import ReviewAction, ReviewRequest, Tier
+from app.services import matches as matches_repo
 
 router = APIRouter()
 
@@ -55,7 +54,44 @@ def record_table(request: Request, category: str | None = Query(default=None)):
 
 @router.get("/review", response_class=HTMLResponse)
 def review_panel(request: Request):
-    # TODO(Task 5): implement the review panel — yellow/red queues with
-    # counts, candidate scores with per-signal breakdowns, and
-    # accept/override/reject actions that persist through the API.
-    return templates.TemplateResponse(request, "review.html", {})
+    conn = get_conn()
+    try:
+        counts = matches_repo.tier_counts(conn)
+        _, yellow = matches_repo.list_matches(conn, Tier.yellow, limit=500, offset=0)
+        _, red = matches_repo.list_matches(conn, Tier.red, limit=500, offset=0)
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request,
+        "review.html",
+        {
+            "counts": counts,
+            # Ordered queues rendered as grouped sections in the template.
+            "queues": [("yellow", yellow), ("red", red)],
+        },
+    )
+
+
+@router.post("/review/{record_id}")
+def submit_review(
+    record_id: str,
+    action: str = Form(...),
+    catalog_id: str | None = Form(default=None),
+    note: str | None = Form(default=None),
+):
+    conn = get_conn()
+    try:
+        request = ReviewRequest(
+            action=ReviewAction(action),
+            catalog_id=catalog_id or None,
+            note=note or None,
+        )
+        matches_repo.apply_review(conn, record_id, request)
+    except (LookupError, ValueError):
+        # Invalid action/target from a hand-crafted request: no-op, fall
+        # through to re-render. DependencyError still propagates.
+        pass
+    finally:
+        conn.close()
+    # POST-Redirect-GET so a refresh doesn't re-submit the review.
+    return RedirectResponse("/review", status_code=303)
